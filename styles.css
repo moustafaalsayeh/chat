@@ -70,6 +70,33 @@ header p {
     font-weight: 500;
 }
 
+.status-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.performance-btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.performance-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: scale(1.1);
+}
+
+.performance-btn.active {
+    background: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
 .status-indicator {
     display: flex;
     align-items: center;

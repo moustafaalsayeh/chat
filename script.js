@@ -8,11 +8,25 @@ class LongPollingChat {
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 1000; // Start with 1 second
         
+        // Performance optimizations
+        this.messageCache = new Map(); // Cache messages to prevent duplicates
+        this.performanceMetrics = {
+            requestCount: 0,
+            totalResponseTime: 0,
+            averageResponseTime: 0,
+            lastResponseTime: 0
+        };
+        this.maxDOMMessages = 50; // Limit DOM messages for performance
+        this.debounceTimeout = null;
+        
+        // Request pooling and reuse
+        this.abortController = null;
+        
         this.initializeElements();
         this.bindEvents();
         this.startPolling();
         
-        console.log('🚀 Long Polling Chat initialized');
+        console.log('🚀 Long Polling Chat initialized with performance optimizations');
     }
     
     initializeElements() {
@@ -64,6 +78,19 @@ class LongPollingChat {
         window.addEventListener('beforeunload', () => {
             this.stopPolling();
         });
+        
+        // Performance dashboard toggle
+        const perfToggle = document.getElementById('performance-toggle');
+        if (perfToggle) {
+            perfToggle.addEventListener('click', () => {
+                const dashboard = document.getElementById('performance-dashboard');
+                if (dashboard) {
+                    const isVisible = dashboard.style.display !== 'none';
+                    dashboard.style.display = isVisible ? 'none' : 'block';
+                    perfToggle.classList.toggle('active', !isVisible);
+                }
+            });
+        }
     }
     
     async sendMessage() {
@@ -152,15 +179,25 @@ class LongPollingChat {
     async poll() {
         if (!this.isPolling) return;
         
+        const requestStartTime = performance.now();
+        
         try {
             this.updateConnectionStatus('connected');
             
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 35000); // 35 second timeout
+            // Reuse abort controller for better performance
+            if (this.abortController) {
+                this.abortController.abort();
+            }
+            this.abortController = new AbortController();
+            
+            const timeoutId = setTimeout(() => this.abortController.abort(), 30000); // Reduced timeout
             
             const response = await fetch(`${this.serverUrl}?lastUpdate=${this.lastUpdate}`, {
                 method: 'GET',
-                signal: controller.signal
+                signal: this.abortController.signal,
+                // Performance optimizations
+                cache: 'no-cache',
+                keepalive: true
             });
             
             clearTimeout(timeoutId);
@@ -171,11 +208,18 @@ class LongPollingChat {
             
             const result = await response.json();
             
+            // Update performance metrics
+            const responseTime = performance.now() - requestStartTime;
+            this.updatePerformanceMetrics(responseTime);
+            
+            // Log server performance if available
+            if (result.performance) {
+                console.log(`⚡ Server execution: ${result.performance.execution_time_ms}ms, Client total: ${responseTime.toFixed(2)}ms`);
+            }
+            
             if (result.status === 'success' && result.messages.length > 0) {
-                // Display new messages
-                result.messages.forEach(message => {
-                    this.displayMessage(message);
-                });
+                // Batch process messages for better performance
+                this.batchDisplayMessages(result.messages);
                 
                 // Update last update time
                 this.lastUpdate = result.lastUpdate;
@@ -204,6 +248,40 @@ class LongPollingChat {
         }
     }
     
+    // Performance metrics tracking
+    updatePerformanceMetrics(responseTime) {
+        this.performanceMetrics.requestCount++;
+        this.performanceMetrics.totalResponseTime += responseTime;
+        this.performanceMetrics.lastResponseTime = responseTime;
+        this.performanceMetrics.averageResponseTime = 
+            this.performanceMetrics.totalResponseTime / this.performanceMetrics.requestCount;
+    }
+    
+    // Optimized batch message display
+    batchDisplayMessages(messages) {
+        const fragment = document.createDocumentFragment();
+        
+        messages.forEach(message => {
+            // Skip if already displayed (prevent duplicates)
+            if (this.messageCache.has(message.id)) {
+                return;
+            }
+            
+            this.messageCache.set(message.id, true);
+            const messageElement = this.createMessageElement(message);
+            fragment.appendChild(messageElement);
+        });
+        
+        // Single DOM update for all messages
+        this.elements.messages.appendChild(fragment);
+        
+        // Cleanup old messages and cache
+        this.cleanupOldMessages();
+        
+        // Auto-scroll to bottom (debounced)
+        this.debouncedScrollToBottom();
+    }
+    
     scheduleNextPoll() {
         const delay = this.reconnectAttempts > 0 ? this.reconnectDelay : 100; // Immediate retry for normal operation
         
@@ -230,9 +308,13 @@ class LongPollingChat {
         console.log(`🔄 Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     }
     
-    displayMessage(message) {
+    // Optimized message element creation
+    createMessageElement(message) {
         const messageElement = document.createElement('div');
         messageElement.className = 'message';
+        messageElement.dataset.messageId = message.id; // For efficient cleanup
+        
+        // Use template literals for better performance
         messageElement.innerHTML = `
             <div class="message-header">
                 <span class="message-user">${this.escapeHtml(message.user)}</span>
@@ -241,16 +323,47 @@ class LongPollingChat {
             <div class="message-content">${this.escapeHtml(message.message)}</div>
         `;
         
+        return messageElement;
+    }
+    
+    // Legacy method for backward compatibility
+    displayMessage(message) {
+        if (this.messageCache.has(message.id)) {
+            return; // Prevent duplicates
+        }
+        
+        this.messageCache.set(message.id, true);
+        const messageElement = this.createMessageElement(message);
         this.elements.messages.appendChild(messageElement);
         
-        // Auto-scroll to bottom
-        this.elements.messages.scrollTop = this.elements.messages.scrollHeight;
-        
-        // Remove old messages if too many (keep last 50)
+        this.cleanupOldMessages();
+        this.debouncedScrollToBottom();
+    }
+    
+    // Optimized cleanup of old messages
+    cleanupOldMessages() {
         const messages = this.elements.messages.querySelectorAll('.message');
-        if (messages.length > 50) {
-            messages[0].remove();
+        if (messages.length > this.maxDOMMessages) {
+            const toRemove = messages.length - this.maxDOMMessages;
+            for (let i = 0; i < toRemove; i++) {
+                const messageId = messages[i].dataset.messageId;
+                if (messageId) {
+                    this.messageCache.delete(messageId);
+                }
+                messages[i].remove();
+            }
         }
+    }
+    
+    // Debounced scroll to bottom
+    debouncedScrollToBottom() {
+        if (this.debounceTimeout) {
+            clearTimeout(this.debounceTimeout);
+        }
+        
+        this.debounceTimeout = setTimeout(() => {
+            this.elements.messages.scrollTop = this.elements.messages.scrollHeight;
+        }, 50); // 50ms debounce
     }
     
     showSystemMessage(message, type = 'info') {
@@ -305,8 +418,54 @@ class LongPollingChat {
         return {
             isPolling: this.isPolling,
             lastUpdate: this.lastUpdate,
-            reconnectAttempts: this.reconnectAttempts
+            reconnectAttempts: this.reconnectAttempts,
+            performance: this.performanceMetrics,
+            cacheSize: this.messageCache.size
         };
+    }
+    
+    // Performance monitoring methods
+    getPerformanceReport() {
+        const memoryInfo = performance.memory || {};
+        return {
+            ...this.performanceMetrics,
+            memoryUsage: {
+                usedJSHeapSize: memoryInfo.usedJSHeapSize || 'N/A',
+                totalJSHeapSize: memoryInfo.totalJSHeapSize || 'N/A',
+                jsHeapSizeLimit: memoryInfo.jsHeapSizeLimit || 'N/A'
+            },
+            cacheStats: {
+                messagesCached: this.messageCache.size,
+                maxDOMMessages: this.maxDOMMessages
+            },
+            connectionStats: {
+                reconnectAttempts: this.reconnectAttempts,
+                maxReconnectAttempts: this.maxReconnectAttempts,
+                currentDelay: this.reconnectDelay
+            }
+        };
+    }
+    
+    // Enable/disable performance logging
+    enablePerformanceLogging() {
+        this.performanceLogging = true;
+        console.log('📊 Performance logging enabled');
+    }
+    
+    disablePerformanceLogging() {
+        this.performanceLogging = false;
+        console.log('📊 Performance logging disabled');
+    }
+    
+    // Clear performance metrics
+    resetPerformanceMetrics() {
+        this.performanceMetrics = {
+            requestCount: 0,
+            totalResponseTime: 0,
+            averageResponseTime: 0,
+            lastResponseTime: 0
+        };
+        console.log('🧹 Performance metrics reset');
     }
 }
 
@@ -316,14 +475,69 @@ function formatTime(timestamp) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Performance monitoring dashboard
+function createPerformanceDashboard() {
+    const dashboard = document.createElement('div');
+    dashboard.id = 'performance-dashboard';
+    dashboard.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 10px;
+        border-radius: 8px;
+        font-family: monospace;
+        font-size: 12px;
+        z-index: 1000;
+        min-width: 200px;
+        display: none;
+    `;
+    
+    document.body.appendChild(dashboard);
+    
+    // Update dashboard every 5 seconds
+    setInterval(() => {
+        if (window.chatApp && dashboard.style.display !== 'none') {
+            const report = window.chatApp.getPerformanceReport();
+            dashboard.innerHTML = `
+                <div style="margin-bottom: 8px; font-weight: bold;">📊 Performance Monitor</div>
+                <div>Requests: ${report.requestCount}</div>
+                <div>Avg Response: ${report.averageResponseTime.toFixed(2)}ms</div>
+                <div>Last Response: ${report.lastResponseTime.toFixed(2)}ms</div>
+                <div>Cache Size: ${report.cacheStats.messagesCached}</div>
+                <div>Memory: ${formatBytes(report.memoryUsage.usedJSHeapSize)}</div>
+                <div>Reconnects: ${report.connectionStats.reconnectAttempts}</div>
+            `;
+        }
+    }, 5000);
+    
+    return dashboard;
+}
+
+function formatBytes(bytes) {
+    if (bytes === 'N/A') return 'N/A';
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    if (bytes === 0) return '0 B';
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+}
+
 // Initialize the chat when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.chatApp = new LongPollingChat();
+    window.performanceDashboard = createPerformanceDashboard();
     
     // Add some helpful console commands
-    console.log('🎮 Available commands:');
+    console.log('🎮 Enhanced commands available:');
     console.log('chatApp.reconnect() - Manually reconnect');
     console.log('chatApp.getStatus() - Get connection status');
+    console.log('chatApp.getPerformanceReport() - Get detailed performance report');
+    console.log('chatApp.resetPerformanceMetrics() - Reset performance counters');
+    console.log('chatApp.enablePerformanceLogging() - Enable performance logging');
+    console.log('chatApp.disablePerformanceLogging() - Disable performance logging');
+    console.log('performanceDashboard.style.display = "block" - Show performance dashboard');
+    console.log('performanceDashboard.style.display = "none" - Hide performance dashboard');
     console.log('chatApp.stopPolling() - Stop long polling');
     console.log('chatApp.startPolling() - Start long polling');
 });
