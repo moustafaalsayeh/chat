@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Long Polling Chat Demo</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Long Polling Chat Demo</h1>
+            <p>Real-time messaging using Long Polling technique</p>
+        </header>
+
+        <div class="chat-container">
+            <div class="status-bar">
+                <span id="connection-status" class="status-indicator">Connecting...</span>
+                <span id="user-count">Users: 1</span>
+            </div>
+
+            <div class="messages-container" id="messages">
+                <div class="system-message">
+                    Welcome to the Long Polling Chat! Messages will appear here in real-time.
+                </div>
+            </div>
+
+            <div class="input-container">
+                <input type="text" id="username" placeholder="Your name" value="User" maxlength="20">
+                <div class="message-input-wrapper">
+                    <input type="text" id="message-input" placeholder="Type your message here..." maxlength="500">
+                    <button id="send-button" type="button">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>How Long Polling Works:</h3>
+            <ol>
+                <li>Client sends request to server</li>
+                <li>Server holds connection open until new data arrives</li>
+                <li>When data is available, server responds immediately</li>
+                <li>Client processes response and immediately sends new request</li>
+                <li>Process repeats for real-time communication</li>
+            </ol>
+            
+            <div class="technical-info">
+                <h4>Technical Details:</h4>
+                <ul>
+                    <li><strong>Timeout:</strong> 30 seconds per request</li>
+                    <li><strong>Check Interval:</strong> 1 second</li>
+                    <li><strong>Storage:</strong> JSON file-based</li>
+                    <li><strong>CORS:</strong> Enabled for cross-origin requests</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
